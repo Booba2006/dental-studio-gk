@@ -2376,20 +2376,43 @@ function initBookingForm() {
     }
 
     const timeSelect = form.querySelector('#bookingTime');
+    const dateInput2 = form.querySelector('#bookingDate');
     if (timeSelect) generateTimeSlots(timeSelect);
+    if (dateInput2 && timeSelect) {
+        dateInput2.addEventListener('change', () => generateTimeSlots(timeSelect));
+    }
 
     form.addEventListener('submit', handleBookingSubmit);
 }
 
-function generateTimeSlots(select) {
+async function generateTimeSlots(select) {
+    select.innerHTML = '<option value="">-- დრო --</option>';
+
+    const form = select.closest('form');
+    const selectedDate = form?.querySelector('#bookingDate')?.value || '';
+    let bookedTimes = [];
+
+    if (selectedDate && typeof firebaseReady !== 'undefined' && firebaseReady && db) {
+        try {
+            const snapshot = await db.collection('bookings')
+                .where('date', '==', selectedDate)
+                .get();
+            bookedTimes = snapshot.docs.map(doc => doc.data().time);
+        } catch(e) { /* fallback: no blocking */ }
+    }
+
     for (let hour = 10; hour < 20; hour++) {
-        for (let min = 0; min < 60; min += 30) {
-            const timeStr = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
-            const option = document.createElement('option');
-            option.value = timeStr;
+        const timeStr = `${hour.toString().padStart(2, '0')}:00`;
+        const option = document.createElement('option');
+        option.value = timeStr;
+        if (bookedTimes.includes(timeStr)) {
+            option.textContent = `${timeStr} — დაჯავშნულია`;
+            option.disabled = true;
+            option.style.color = '#e74c3c';
+        } else {
             option.textContent = timeStr;
-            select.appendChild(option);
         }
+        select.appendChild(option);
     }
 }
 
@@ -2419,6 +2442,20 @@ async function handleBookingSubmit(e) {
     if (!phoneRegex.test(formData.phone)) {
         showToast('გთხოვთ შეიყვანოთ სწორი ტელეფონის ნომერი', 'error');
         return;
+    }
+
+    // Block double booking
+    if (typeof firebaseReady !== 'undefined' && firebaseReady && db) {
+        try {
+            const existing = await db.collection('bookings')
+                .where('date', '==', formData.date)
+                .where('time', '==', formData.time)
+                .get();
+            if (!existing.empty) {
+                showToast('ეს დრო უკვე დაჯავშნულია. გთხოვთ აირჩიოთ სხვა დრო.', 'error');
+                return;
+            }
+        } catch(e) { /* continue if check fails */ }
     }
 
     // Disable button
